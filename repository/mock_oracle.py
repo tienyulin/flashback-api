@@ -74,6 +74,14 @@ class MockOracleRepository(OracleRepository):
             "estimated_flashback_size": self.estimated_flashback_size,
         }
 
+    def timestamp_to_scn(self, ts: str) -> int:
+        # Spec §4 deterministic formula: +1 SCN per second from the oldest
+        # flashback baseline, capped at current_scn.
+        oldest = datetime.fromisoformat(self.oldest_flashback_time)
+        target = datetime.fromisoformat(ts)
+        seconds = int((target - oldest).total_seconds())
+        return min(self.oldest_flashback_scn + seconds, self.current_scn)
+
     def list_restore_points(self) -> list[dict]:
         return sorted(self.restore_points.values(), key=lambda rp: rp["scn"])
 

@@ -1,4 +1,7 @@
-"""Endpoint tests per spec §8 — all against MockOracleRepository."""
+"""Endpoint tests — one or more per acceptance criterion (spec §3/§8).
+
+Test names carry the AC id they verify. All against MockOracleRepository.
+"""
 from fastapi.testclient import TestClient
 
 from core import deps
@@ -16,12 +19,17 @@ def _mock():
 
 
 # ---------------------------------------------------------------------------
-# status
+# health / status / reads
 # ---------------------------------------------------------------------------
 
-def test_status_fields_and_preconditions():
+def test_ac_hl_1_health():
+    assert client.get("/health").json() == {"status": "ok"}
+
+
+def test_ac_st_1_status_fields_and_preconditions():
     body = client.get("/flashback/status").json()
     assert body["log_mode"] == "ARCHIVELOG"
+    assert body["db_state"] == "OPEN"
     assert body["current_scn"] == 2_000_000
     assert body["fra_usage_percent"] == 40.0
     assert body["preconditions"] == {
@@ -29,59 +37,84 @@ def test_status_fields_and_preconditions():
     }
 
 
-# ---------------------------------------------------------------------------
-# restore points
-# ---------------------------------------------------------------------------
-
-def test_list_restore_points_seeded():
+def test_ac_rpl_1_list_restore_points_scn_ascending():
     body = client.get("/restore_points").json()
     assert [rp["name"] for rp in body["restore_points"]] == ["BEFORE_UPGRADE_20260611"]
 
 
-def test_create_restore_point_dry_run_does_not_change_state():
-    resp = client.post("/restore_points", json={"name": "before_test_20260612"})
-    assert resp.status_code == 200
-    assert resp.json()["dry_run"] is True
-    assert resp.json()["checks"]["no_duplicate_name"]["ok"] is True
-    assert len(client.get("/restore_points").json()["restore_points"]) == 1
+def test_ac_rb_1_recyclebin_droptime_descending():
+    entries = client.get("/recyclebin").json()["entries"]
+    assert [e["original_name"] for e in entries] == ["BONUS"]
 
 
-def test_create_restore_point_executes():
+def test_ac_rb_2_owner_filter_case_insensitive():
+    assert client.get("/recyclebin?owner=scott").json()["entries"] != []
+    assert client.get("/recyclebin?owner=NOBODY").json()["entries"] == []
+
+
+def test_ac_au_1_audit_log_limit_clamped():
+    assert client.get("/audit/log?limit=99999").status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# restore points
+# ---------------------------------------------------------------------------
+
+def test_ac_rpc_1_create_executes_uppercased():
     resp = client.post(
         "/restore_points", json={"name": "before_test_20260612", "dry_run": False}
     )
     assert resp.status_code == 200
     rp = resp.json()["restore_point"]
-    assert rp["name"] == "BEFORE_TEST_20260612"  # uppercased
-    assert rp["guarantee"] is True
+    assert rp["name"] == "BEFORE_TEST_20260612"
     assert len(client.get("/restore_points").json()["restore_points"]) == 2
 
 
-def test_create_duplicate_restore_point_409():
+def test_ac_rpc_2_dry_run_returns_checks_no_state_change():
+    resp = client.post("/restore_points", json={"name": "x"})
+    body = resp.json()
+    assert body["dry_run"] is True
+    assert body["would_create"] == "X"
+    assert set(body["checks"]) == {"P3_fra_space", "no_duplicate_name"}
+    assert body["checks"]["no_duplicate_name"]["ok"] is True
+    assert len(client.get("/restore_points").json()["restore_points"]) == 1
+
+
+def test_ac_rpc_3_duplicate_name_409():
     resp = client.post(
-        "/restore_points",
-        json={"name": "BEFORE_UPGRADE_20260611", "dry_run": False},
+        "/restore_points", json={"name": "BEFORE_UPGRADE_20260611", "dry_run": False}
     )
     assert resp.status_code == 409
     assert resp.json()["error_code"] == "ORA-38796"
 
 
-def test_create_restore_point_fra_full_409():
-    _mock().fra_used_bytes = int(_mock().fra_limit_bytes * 0.9)  # 90% > 85%
+def test_ac_rpc_4_fra_at_threshold_409():
+    _mock().fra_used_bytes = int(_mock().fra_limit_bytes * 0.85)  # exactly 85% = fail
     resp = client.post("/restore_points", json={"name": "x", "dry_run": False})
     assert resp.status_code == 409
     assert resp.json()["error_code"] == "ORA-19809"
 
 
-def test_drop_restore_point():
+def test_ac_rpc_5_guarantee_defaults_true():
+    resp = client.post("/restore_points", json={"name": "g", "dry_run": False})
+    assert resp.json()["restore_point"]["guarantee"] is True
+
+
+def test_ac_rpd_1_drop_returns_full_record():
     resp = client.delete("/restore_points/before_upgrade_20260611?dry_run=false")
     assert resp.status_code == 200
     assert resp.json()["dropped"]["guarantee"] is True
     assert client.get("/restore_points").json()["restore_points"] == []
 
 
-def test_drop_missing_restore_point_404():
-    resp = client.delete("/restore_points/NOPE?dry_run=false")
+def test_ac_rpd_2_dry_run_would_drop():
+    resp = client.delete("/restore_points/BEFORE_UPGRADE_20260611")
+    assert resp.json()["would_drop"]["scn"] == 1_800_000
+    assert len(client.get("/restore_points").json()["restore_points"]) == 1
+
+
+def test_ac_rpd_3_missing_404_even_dry_run():
+    resp = client.delete("/restore_points/NOPE")  # dry_run defaults true
     assert resp.status_code == 404
     assert resp.json()["error_code"] == "ORA-38780"
 
@@ -99,30 +132,72 @@ def _table_req(**over):
     return req
 
 
-def test_flashback_table_dry_run_returns_checks():
-    resp = client.post("/flashback/table", json=_table_req(dry_run=True))
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["dry_run"] is True
-    assert body["checks"]["P4_within_retention"]["ok"] is True
-    assert body["checks"]["P6_row_movement"]["ok"] is True
-
-
-def test_flashback_table_executes_with_prior_scn():
+def test_ac_ft_1_executes_with_prior_and_executed_scn():
     resp = client.post("/flashback/table", json=_table_req())
     assert resp.status_code == 200
     body = resp.json()
     assert body["prior_scn"] == 2_000_000
+    assert body["executed_scn"] == 1_700_000
     assert client.get("/flashback/status").json()["current_scn"] > 2_000_000
 
 
-def test_flashback_table_row_movement_disabled_409():
+def test_ac_ft_2_timestamp_resolves_to_scn():
+    # mock formula: oldest_scn(1_500_000) + seconds since oldest_time
+    resp = client.post(
+        "/flashback/table",
+        json=_table_req(target={"timestamp": "2026-06-11T09:00:10"}),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["executed_scn"] == 1_500_010  # NOT current_scn
+
+
+def test_ac_ft_3_dry_run_includes_prior_scn_and_checks():
+    resp = client.post("/flashback/table", json=_table_req(dry_run=True))
+    body = resp.json()
+    assert body["dry_run"] is True
+    assert body["prior_scn"] == 2_000_000
+    assert body["checks"]["P4_within_retention"]["ok"] is True
+    # dry_run + enable_row_movement must NOT alter the table
+    client.post("/flashback/table", json=_table_req(
+        table_name="DEPT", dry_run=True, enable_row_movement=True))
+    assert _mock().get_table("SCOTT", "DEPT")["row_movement"] is False
+
+
+def test_ac_ft_4_unknown_table_404_even_dry_run():
+    resp = client.post("/flashback/table", json=_table_req(table_name="GHOST", dry_run=True))
+    assert resp.status_code == 404
+
+
+def test_ac_ft_5_scn_below_oldest_409():
+    resp = client.post("/flashback/table", json=_table_req(target={"scn": 1_499_999}))
+    assert resp.status_code == 409
+    assert resp.json()["error_code"] == "ORA-38729"
+    # boundary: exactly oldest passes P4
+    ok = client.post("/flashback/table", json=_table_req(target={"scn": 1_500_000}))
+    assert ok.status_code == 200
+
+
+def test_ac_ft_5_timestamp_below_oldest_409():
+    resp = client.post(
+        "/flashback/table",
+        json=_table_req(target={"timestamp": "2026-06-11T08:59:59"}),
+    )
+    assert resp.status_code == 409
+    assert resp.json()["error_code"] == "ORA-38729"
+
+
+def test_ac_ft_6_future_scn_422():
+    resp = client.post("/flashback/table", json=_table_req(target={"scn": 9_999_999}))
+    assert resp.status_code == 422
+
+
+def test_ac_ft_7_row_movement_disabled_409():
     resp = client.post("/flashback/table", json=_table_req(table_name="DEPT"))
     assert resp.status_code == 409
     assert resp.json()["error_code"] == "ORA-08189"
 
 
-def test_flashback_table_auto_enable_row_movement():
+def test_ac_ft_8_auto_enable_row_movement():
     resp = client.post(
         "/flashback/table", json=_table_req(table_name="DEPT", enable_row_movement=True)
     )
@@ -130,29 +205,30 @@ def test_flashback_table_auto_enable_row_movement():
     assert _mock().get_table("SCOTT", "DEPT")["row_movement"] is True
 
 
-def test_flashback_table_beyond_retention_409():
-    resp = client.post(
-        "/flashback/table", json=_table_req(target={"scn": 1_400_000})
-    )
-    assert resp.status_code == 409
-    assert resp.json()["error_code"] == "ORA-38729"
+def test_ac_ft_8_no_side_effect_when_other_check_fails():
+    """Doomed request must not auto-enable row movement (iteration-2 DRIFT-003)."""
+    resp = client.post("/flashback/table", json=_table_req(
+        table_name="DEPT", enable_row_movement=True, target={"scn": 1_400_000}))
+    assert resp.status_code == 409  # P4 fails
+    assert _mock().get_table("SCOTT", "DEPT")["row_movement"] is False
 
 
-def test_flashback_table_unknown_table_404():
-    resp = client.post("/flashback/table", json=_table_req(table_name="GHOST"))
-    assert resp.status_code == 404
+def test_ac_ft_9_no_idempotency_both_execute():
+    a = client.post("/flashback/table", json=_table_req())
+    b = client.post("/flashback/table", json=_table_req())
+    assert a.status_code == b.status_code == 200
+    ops = [e for e in client.get("/audit/log").json()["entries"]
+           if e["operation"] == "flashback_table" and e["result"] == "success"]
+    assert len(ops) == 2
 
 
-def test_flashback_table_target_must_be_exactly_one():
+def test_target_exactly_one_key_422():
     resp = client.post(
         "/flashback/table",
         json=_table_req(target={"scn": 1, "timestamp": "2026-06-12T09:00:00"}),
     )
     assert resp.status_code == 422
-
-
-def test_flashback_table_future_scn_422():
-    resp = client.post("/flashback/table", json=_table_req(target={"scn": 9_999_999}))
+    resp = client.post("/flashback/table", json=_table_req(target={}))
     assert resp.status_code == 422
 
 
@@ -160,7 +236,7 @@ def test_flashback_table_future_scn_422():
 # flashback drop
 # ---------------------------------------------------------------------------
 
-def test_flashback_drop_restores_from_recyclebin():
+def test_ac_fd_1_restores_most_recent_drop():
     resp = client.post(
         "/flashback/drop",
         json={"owner": "SCOTT", "table_name": "BONUS", "dry_run": False},
@@ -170,24 +246,36 @@ def test_flashback_drop_restores_from_recyclebin():
     assert client.get("/recyclebin").json()["entries"] == []
 
 
-def test_flashback_drop_not_in_recyclebin_404():
+def test_ac_fd_2_rename_to_null_uses_original_name():
     resp = client.post(
         "/flashback/drop",
-        json={"owner": "SCOTT", "table_name": "GHOST", "dry_run": False},
+        json={"owner": "SCOTT", "table_name": "BONUS", "rename_to": None, "dry_run": False},
+    )
+    assert resp.json()["restored_as"] == "BONUS"
+
+
+def test_ac_fd_3_dry_run_no_state_change():
+    resp = client.post("/flashback/drop", json={"owner": "SCOTT", "table_name": "BONUS"})
+    assert resp.json()["dry_run"] is True
+    assert resp.json()["restored_as"] == "BONUS"
+    assert len(client.get("/recyclebin").json()["entries"]) == 1
+
+
+def test_ac_fd_4_not_in_recyclebin_404():
+    resp = client.post(
+        "/flashback/drop", json={"owner": "SCOTT", "table_name": "GHOST", "dry_run": False}
     )
     assert resp.status_code == 404
     assert resp.json()["error_code"] == "ORA-38305"
 
 
-def test_flashback_drop_name_conflict_409_then_rename_ok():
-    # EMP still exists — restoring a dropped EMP would collide.
+def test_ac_fd_5_name_conflict_409_then_rename_ok():
     _mock().recyclebin.append({
         "owner": "SCOTT", "object_name": "BIN$x==$0",
         "original_name": "EMP", "droptime": "2026-06-12T08:45:00",
     })
     conflict = client.post(
-        "/flashback/drop",
-        json={"owner": "SCOTT", "table_name": "EMP", "dry_run": False},
+        "/flashback/drop", json={"owner": "SCOTT", "table_name": "EMP", "dry_run": False}
     )
     assert conflict.status_code == 409
     assert conflict.json()["error_code"] == "ORA-38312"
@@ -202,7 +290,7 @@ def test_flashback_drop_name_conflict_409_then_rename_ok():
 
 
 # ---------------------------------------------------------------------------
-# flashback database + finalize (irreversible gates)
+# flashback database + finalize
 # ---------------------------------------------------------------------------
 
 def _db_req(**over):
@@ -211,49 +299,77 @@ def _db_req(**over):
     return req
 
 
-def test_flashback_database_dry_run_state_unchanged():
-    resp = client.post("/flashback/database", json=_db_req(dry_run=True))
+def test_ac_db_1_full_flow_with_resolved_scn():
+    resp = client.post("/flashback/database", json=_db_req(**CONFIRMED))
     assert resp.status_code == 200
-    assert resp.json()["dry_run"] is True
-    assert all(c["ok"] for c in resp.json()["checks"].values())
+    body = resp.json()
+    assert body["db_state"] == "FLASHBACKED"
+    assert body["flashed_back_to_scn"] == 1_800_000
+    assert client.get("/flashback/status").json()["current_scn"] == 1_800_000
+
+
+def test_ac_db_1_timestamp_target_resolves():
+    resp = client.post(
+        "/flashback/database",
+        json=_db_req(target={"timestamp": "2026-06-11T09:01:40"}, **CONFIRMED),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["flashed_back_to_scn"] == 1_500_100  # oldest + 100s
+
+
+def test_ac_db_2_dry_run_checks_and_resolved_scn():
+    resp = client.post("/flashback/database", json=_db_req(dry_run=True))
+    body = resp.json()
+    assert body["dry_run"] is True
+    assert all(c["ok"] for c in body["checks"].values())
+    assert body["resolved_target_scn"] == 1_800_000
+    assert body["estimated_flashback_size"] == 2 * 2**30
     assert client.get("/flashback/status").json()["db_state"] == "OPEN"
 
 
-def test_flashback_database_requires_confirm_428():
+def test_ac_db_2_dry_run_timestamp_below_oldest_resolves_null():
+    resp = client.post(
+        "/flashback/database",
+        json=_db_req(target={"timestamp": "2026-06-11T08:00:00"}, dry_run=True),
+    )
+    body = resp.json()
+    assert body["checks"]["P4_within_retention"]["ok"] is False
+    assert body["resolved_target_scn"] is None
+
+
+def test_ac_db_3_missing_confirm_or_approval_428():
     assert client.post("/flashback/database", json=_db_req()).status_code == 428
-
-
-def test_flashback_database_requires_approval_id_428():
     resp = client.post(
         "/flashback/database", json=_db_req(confirm=CONFIRM_TOKEN, approval_id="  ")
     )
     assert resp.status_code == 428
 
 
-def test_flashback_database_unknown_restore_point_404():
+def test_ac_db_4_unknown_restore_point_404_before_428():
+    # no confirm given — 404 must win (gate 3 before gate 4)
     resp = client.post(
-        "/flashback/database",
-        json=_db_req(target={"restore_point": "NOPE"}, **CONFIRMED),
+        "/flashback/database", json=_db_req(target={"restore_point": "NOPE"})
     )
     assert resp.status_code == 404
     assert resp.json()["error_code"] == "ORA-38780"
 
 
-def test_flashback_database_full_flow_and_finalize():
+def test_ac_db_5_p2_violation_detail_prefix():
+    _mock().flashback_on = False
     resp = client.post("/flashback/database", json=_db_req(**CONFIRMED))
-    assert resp.status_code == 200
-    assert resp.json()["db_state"] == "FLASHBACKED"
-    assert resp.json()["flashed_back_to_scn"] == 1_800_000
+    assert resp.status_code == 409
+    assert resp.json()["error_code"] is None
+    assert resp.json()["detail"].startswith("P2 violated")
 
-    # second flashback while not OPEN -> 409
+
+def test_ac_db_6_not_open_409():
+    client.post("/flashback/database", json=_db_req(**CONFIRMED))
     again = client.post("/flashback/database", json=_db_req(**CONFIRMED))
     assert again.status_code == 409
 
-    # finalize without confirm -> 428
-    assert client.post(
-        "/flashback/database/finalize", json={"dry_run": False}
-    ).status_code == 428
 
+def test_ac_fz_1_finalize_resetlogs():
+    client.post("/flashback/database", json=_db_req(**CONFIRMED))
     done = client.post(
         "/flashback/database/finalize", json={"dry_run": False, **CONFIRMED}
     )
@@ -262,32 +378,46 @@ def test_flashback_database_full_flow_and_finalize():
     assert "RMAN" in done.json()["warning"]
 
 
-def test_finalize_without_pending_flashback_409():
-    resp = client.post(
-        "/flashback/database/finalize", json={"dry_run": False, **CONFIRMED}
-    )
-    assert resp.status_code == 409
+def test_ac_fz_2_dry_run_reports_current_scn():
+    client.post("/flashback/database", json=_db_req(**CONFIRMED))
+    resp = client.post("/flashback/database/finalize", json={"dry_run": True})
+    assert resp.json()["would_finalize_at_scn"] == 1_800_000
+
+
+def test_ac_fz_3_not_flashbacked_409_even_dry_run():
+    assert client.post("/flashback/database/finalize", json={}).status_code == 409
+
+
+def test_ac_fz_4_missing_confirm_428():
+    client.post("/flashback/database", json=_db_req(**CONFIRMED))
+    resp = client.post("/flashback/database/finalize", json={"dry_run": False})
+    assert resp.status_code == 428
 
 
 # ---------------------------------------------------------------------------
 # auth
 # ---------------------------------------------------------------------------
 
-def test_mutations_require_api_key_when_configured(monkeypatch):
+def test_ac_auth_1_mutations_401_without_key(monkeypatch):
     monkeypatch.setenv("FLASHBACK_API_KEY", "secret-key")
     assert client.post("/restore_points", json={"name": "x"}).status_code == 401
-    assert client.get("/flashback/status").status_code == 200  # reads stay open
     ok = client.post(
         "/restore_points", json={"name": "x"}, headers={"X-API-Key": "secret-key"}
     )
     assert ok.status_code == 200
 
 
+def test_ac_auth_2_reads_never_require_key(monkeypatch):
+    monkeypatch.setenv("FLASHBACK_API_KEY", "secret-key")
+    assert client.get("/flashback/status").status_code == 200
+    assert client.get("/audit/log").status_code == 200
+
+
 # ---------------------------------------------------------------------------
-# audit
+# audit (spec §7)
 # ---------------------------------------------------------------------------
 
-def test_audit_records_dry_run_rejected_and_success():
+def test_audit_result_patterns_and_operator():
     client.post("/restore_points", json={"name": "a"})                      # dry_run
     client.post("/restore_points", json={"name": "a", "dry_run": False})    # success
     client.post("/restore_points",
@@ -299,3 +429,18 @@ def test_audit_records_dry_run_rejected_and_success():
     assert "success" in results
     assert "dry_run" in results
     assert all(e["operator"] == "dev" for e in entries)
+
+
+def test_audit_target_fields_per_operation():
+    client.post("/flashback/table", json=_table_req(
+        target={"timestamp": "2026-06-11T09:00:10"}))
+    entry = client.get("/audit/log").json()["entries"][0]
+    assert entry["operation"] == "flashback_table"
+    assert entry["target"] == "SCOTT.EMP"
+    assert entry["target_scn"] is None            # original form was timestamp
+    assert entry["target_time"] == "2026-06-11T09:00:10"
+
+    client.post("/flashback/database", json=_db_req(**CONFIRMED))
+    entry = client.get("/audit/log").json()["entries"][0]
+    assert entry["target"] == "BEFORE_UPGRADE_20260611"
+    assert entry["approval_id"] == "CHG-2026-0612-001"

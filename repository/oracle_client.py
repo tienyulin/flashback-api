@@ -20,6 +20,13 @@ class OracleRepository(ABC):
         v$flashback_database_log, SHOW PARAMETER db_flashback_retention_target."""
 
     @abstractmethod
+    def timestamp_to_scn(self, ts: str) -> int:
+        """SELECT TIMESTAMP_TO_SCN(TO_TIMESTAMP(:ts,'YYYY-MM-DD"T"HH24:MI:SS'))
+        FROM dual
+        Caller checks the P4 lower bound first; result never exceeds current_scn
+        (mock caps explicitly; real Oracle cannot return a future SCN)."""
+
+    @abstractmethod
     def list_restore_points(self) -> list[dict]:
         """SELECT name, scn, time, guarantee_flashback_database, storage_size
         FROM v$restore_point ORDER BY scn"""
@@ -100,6 +107,9 @@ class RealOracleRepository(OracleRepository):
     # Not exercised in this repo (no Oracle instance); MOCK_ORACLE=true is
     # the supported mode here.
     def get_status(self) -> dict:
+        raise NotImplementedError("requires a live Oracle target")
+
+    def timestamp_to_scn(self, ts: str) -> int:
         raise NotImplementedError("requires a live Oracle target")
 
     def list_restore_points(self) -> list[dict]:

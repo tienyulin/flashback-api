@@ -8,6 +8,10 @@ from typing import Optional
 
 from models.schemas import (
     CONFIRM_TOKEN,
+    NEXT_STEP_DB_FINALIZE,
+    NOTE_FD_BIN_INDEX,
+    NOTE_FT_ROLLBACK,
+    WARNING_FZ_RMAN,
     FlashbackDatabaseRequest,
     FlashbackDropRequest,
     FlashbackTableRequest,
@@ -236,25 +240,41 @@ class FlashbackService:
         checks = self._run_checks(originals)
 
         if req.dry_run:
+            # AC-FT-3: prior_scn included so the caller records the rollback
+            # point before executing; enable_row_movement is NOT applied.
             self._audit(operator, "flashback_table", target=target_label,
                         target_scn=req.target.scn, target_time=req.target.timestamp,
                         dry_run=True, result="dry_run")
-            return {"dry_run": True, "checks": checks}
+            return {"dry_run": True, "prior_scn": s["current_scn"], "checks": checks}
 
         try:
+            # Auxiliary mutation (auto ENABLE ROW MOVEMENT) only after every
+            # OTHER precondition is known to pass — a doomed request must not
+            # leave side effects (iteration-2 audit DRIFT-003).
+            others = {k: v for k, v in checks.items() if k != "P6_row_movement"}
+            self._raise_first_failure(others, originals)
             if req.enable_row_movement and not checks["P6_row_movement"]["ok"]:
                 self.oracle.enable_row_movement(owner, table)
                 checks["P6_row_movement"] = {"ok": True}
             self._raise_first_failure(checks, originals)
 
-            prior_scn = s["current_scn"]
-            # timestamp targets are bound-checked against oldest_flashback_time
-            # above; the real repo issues TO TIMESTAMP, the mock just ticks.
-            self.oracle.flashback_table(owner, table, req.target.scn or prior_scn)
+            prior_scn = self.oracle.get_status()["current_scn"]
+            # Spec target-resolution order: P4 checked on the original input
+            # form above; timestamp resolves to SCN only now (AC-FT-2).
+            if req.target.scn is not None:
+                executed_scn = req.target.scn
+            else:
+                executed_scn = self.oracle.timestamp_to_scn(req.target.timestamp)
+            self.oracle.flashback_table(owner, table, executed_scn)
         except FlashbackError as e:
             self._audit(operator, "flashback_table", target=target_label,
                         target_scn=req.target.scn, target_time=req.target.timestamp,
                         result=f"rejected:{e.error_code or e.detail}")
+            raise
+        except Exception as e:
+            self._audit(operator, "flashback_table", target=target_label,
+                        target_scn=req.target.scn, target_time=req.target.timestamp,
+                        result=f"error:{e}")
             raise
 
         self._audit(operator, "flashback_table", target=target_label,
@@ -264,7 +284,8 @@ class FlashbackService:
             "dry_run": False,
             "flashed_back": target_label,
             "prior_scn": prior_scn,
-            "note": "資料驗證錯誤時可用 prior_scn 再 flashback 回來（SOP §4.1 步驟 2）",
+            "executed_scn": executed_scn,
+            "note": NOTE_FT_ROLLBACK,
         }
 
     def flashback_drop(self, req: FlashbackDropRequest, operator: str) -> dict:
@@ -304,7 +325,7 @@ class FlashbackService:
         return {
             "dry_run": False,
             **result,
-            "note": "索引仍為 BIN$ 系統名，需手動 rename（SOP §4.2 步驟 3）",
+            "note": NOTE_FD_BIN_INDEX,
         }
 
     def flashback_database(self, req: FlashbackDatabaseRequest, operator: str) -> dict:
@@ -325,6 +346,9 @@ class FlashbackService:
                 )
             target_scn = rp["scn"]
 
+        rp_name = req.target.restore_point.upper() if req.target.restore_point else None
+        audit_target = rp_name
+
         originals = {
             "P1_archivelog": lambda: self._check_p1_archivelog(s),
             "P2_flashback_on": lambda: self._check_p2_flashback_on(s),
@@ -335,32 +359,48 @@ class FlashbackService:
         }
         checks = self._run_checks(originals)
 
+        def resolve_scn():
+            """Spec resolution order: P4 on the original form, then timestamp
+            resolves via the repository (read-only; capped at current_scn)."""
+            if target_scn is not None:
+                return target_scn
+            return self.oracle.timestamp_to_scn(target_time)
+
         if req.dry_run:
-            self._audit(operator, "flashback_database", target_scn=target_scn,
-                        target_time=target_time, dry_run=True,
-                        approval_id=req.approval_id, result="dry_run")
+            # AC-DB-2: timestamp resolves only when P4 passed, else null.
+            resolved = resolve_scn() if checks["P4_within_retention"]["ok"] else None
+            self._audit(operator, "flashback_database", target=audit_target,
+                        target_scn=target_scn, target_time=target_time,
+                        dry_run=True, approval_id=req.approval_id, result="dry_run")
             return {"dry_run": True, "checks": checks,
-                    "estimated_flashback_size": s["estimated_flashback_size"]}
+                    "estimated_flashback_size": s["estimated_flashback_size"],
+                    "resolved_target_scn": resolved}
 
         self._require_confirmation(req.confirm, req.approval_id)
         try:
             self._raise_first_failure(checks, originals)
-            self.oracle.flashback_database(target_scn or s["oldest_flashback_scn"])
+            flashed_scn = resolve_scn()
+            self.oracle.flashback_database(flashed_scn)
         except FlashbackError as e:
-            self._audit(operator, "flashback_database", target_scn=target_scn,
-                        target_time=target_time, approval_id=req.approval_id,
+            self._audit(operator, "flashback_database", target=audit_target,
+                        target_scn=target_scn, target_time=target_time,
+                        approval_id=req.approval_id,
                         result=f"rejected:{e.error_code or e.detail}")
             raise
+        except Exception as e:
+            self._audit(operator, "flashback_database", target=audit_target,
+                        target_scn=target_scn, target_time=target_time,
+                        approval_id=req.approval_id, result=f"error:{e}")
+            raise
 
-        self._audit(operator, "flashback_database", target_scn=target_scn,
-                    target_time=target_time, approval_id=req.approval_id,
-                    result="success")
+        self._audit(operator, "flashback_database", target=audit_target,
+                    target_scn=target_scn, target_time=target_time,
+                    approval_id=req.approval_id, result="success")
         return {
             "dry_run": False,
             "db_state": "FLASHBACKED",
-            "flashed_back_to_scn": target_scn,
-            "next_step": "人工驗證資料後呼叫 POST /flashback/database/finalize"
-                         "（SOP §5 步驟 4）",
+            "flashed_back_to_scn": flashed_scn,
+            "next_step": NEXT_STEP_DB_FINALIZE,
         }
 
     def _check_db_open(self, s: dict):
@@ -392,5 +432,5 @@ class FlashbackService:
         return {
             "dry_run": False,
             "db_state": "OPEN",
-            "warning": "RESETLOGS 完成，舊備份基線失效，立即執行 RMAN 全備（SOP §5 步驟 5）",
+            "warning": WARNING_FZ_RMAN,
         }

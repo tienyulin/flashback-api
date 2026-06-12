@@ -6,6 +6,12 @@ from pydantic import BaseModel, Field, model_validator
 
 CONFIRM_TOKEN = "I-UNDERSTAND-DATA-LOSS"
 
+# Fixed literals (spec §7.1) — single home; service code must reference these.
+NOTE_FT_ROLLBACK = "資料驗證錯誤時可用 prior_scn 再 flashback 回來（SOP §4.1 步驟 2）"
+NOTE_FD_BIN_INDEX = "索引仍為 BIN$ 系統名，需手動 rename（SOP §4.2 步驟 3）"
+NEXT_STEP_DB_FINALIZE = "人工驗證資料後呼叫 POST /flashback/database/finalize（SOP §5 步驟 4）"
+WARNING_FZ_RMAN = "RESETLOGS 完成，舊備份基線失效，立即執行 RMAN 全備（SOP §5 步驟 5）"
+
 
 # ---------------------------------------------------------------------------
 # Domain entities (spec §1)

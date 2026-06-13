@@ -114,6 +114,20 @@ cd flashback-api && python -m pytest -q     # 47 passed
 測試名對應 spec 驗收準則編號（如 `test_ac_ft_2_timestamp_resolves_to_scn`
 ↔ spec Part B §3 AC-FT-2）。
 
+## 推進 llm wiki
+
+這份 README 本身就是送進 llm wiki 的文檔——它有 H1 與端點清單，wiki-processor
+直接萃取得到。模擬應用端的 GitLab CI push（repo 根目錄執行）：
+
+```bash
+docker compose up -d minio wiki-processor mcp-server   # mock 全鏈，無需 key
+bash examples/simulate-app-push.sh                     # 拿本 README POST /process
+curl -s 'localhost:8002/search_apis?query=flashback' | python3 -m json.tool
+```
+
+完整 pipeline（SOP → spec → API → README → wiki → 查詢）與實跑輸出見
+[docs/guides/sop-to-wiki-pipeline.md](../docs/guides/sop-to-wiki-pipeline.md)。
+
 ## 注意
 
 - `RealOracleRepository` 是骨架（介面 docstring 寫明每個方法對應的 SQL）——

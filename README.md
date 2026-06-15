@@ -105,6 +105,12 @@ curl -s localhost:8003/audit/log | python3 -m json.tool
 | `FLASHBACK_API_KEY` | 空 | 設定後所有 🟡/🔴 端點需 `X-API-Key` header；空 = dev 模式不驗 |
 | `FRA_USAGE_THRESHOLD` | `85` | FRA 空間使用率門檻（%） |
 
+## Dev Container
+
+本 repo 附 [`.devcontainer/`](.devcontainer/)。VS Code / Cursor **Reopen in
+Container** 即建立隔離的 Python 環境（不影響主機、不與其他服務衝突），原始碼
+即時掛載於 `/app`。容器內：`python -m pytest`、`python main.py`（:8003）。
+
 ## 測試
 
 ```bash

@@ -1,0 +1,8 @@
+# Dev-container override for the standalone stack (docker-compose.yml).
+# Keeps the service container alive so VS Code can attach; source is bind-mounted
+# live at /app by devcontainer.json. No external deps in mock mode.
+services:
+  flashback-api:
+    command: sleep infinity
+    environment:
+      MOCK_ORACLE: ${MOCK_ORACLE:-true}

@@ -1,0 +1,23 @@
+# Standalone flashback-api. No external dependencies in mock mode.
+#
+#   cp .env.example .env
+#   docker compose up -d --build
+#   curl localhost:8003/health
+#
+# For a real Oracle backend: set MOCK_ORACLE=false and ORACLE_* in .env.
+services:
+  flashback-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: flashback-api
+    ports:
+      - "8003:8003"
+    environment:
+      MOCK_ORACLE: ${MOCK_ORACLE:-true}
+      ORACLE_DSN: ${ORACLE_DSN:-}
+      ORACLE_USER: ${ORACLE_USER:-}
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD:-}
+      FLASHBACK_API_KEY: ${FLASHBACK_API_KEY:-}
+      FRA_USAGE_THRESHOLD: ${FRA_USAGE_THRESHOLD:-85}
+    command: python main.py

@@ -1,0 +1,25 @@
+{
+  "name": "flashback-api",
+  "dockerComposeFile": ["../docker-compose.yml", "docker-compose.dev.yml"],
+  "service": "flashback-api",
+  "workspaceFolder": "/app",
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/app,type=bind,consistency=cached"
+  ],
+  "shutdownAction": "stopCompose",
+  "forwardPorts": [8003],
+  "postCreateCommand": "pip install -r requirements.txt",
+  "remoteEnv": {
+    "MOCK_ORACLE": "true"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python", "ms-python.vscode-pylance"],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": ["."]
+      }
+    }
+  }
+}

@@ -1,5 +1,7 @@
 # flashback-api — Oracle Flashback Recovery API
 
+> 👉 想看這個服務**實際怎麼運作（含真實紀錄）**：[docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md)。
+
 把 Oracle DBA 的 flashback 復原操作（誤改回溯、誤刪救回、還原點管理、整庫回溯）
 包成 REST API。來源文件鏈：
 

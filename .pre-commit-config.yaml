@@ -1,0 +1,20 @@
+repos:
+  - repo: local
+    hooks:
+      - id: gen-openapi
+        name: regenerate openapi.json
+        entry: python scripts/gen_openapi.py --app main:app
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: openapi-completeness
+        name: openapi completeness gate
+        entry: python scripts/openapi_completeness.py --fail
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: frontmatter-lint
+        name: frontmatter lint
+        entry: python scripts/lint_frontmatter.py
+        language: system
+        files: '\.md$'

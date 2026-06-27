@@ -1,3 +1,9 @@
+---
+type: api
+source_app: flashback-api
+tags: [oracle, recovery, dba]
+---
+
 # flashback-api — Oracle Flashback Recovery API
 
 > 👉 想看這個服務**實際怎麼運作（含真實紀錄）**：[docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md)。

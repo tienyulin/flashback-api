@@ -1,3 +1,5 @@
+"""Flashback routes: recyclebin, table/drop (reversible), database/finalize (irreversible)."""
+
 from typing import Optional
 
 from fastapi import APIRouter, Depends
@@ -16,15 +18,16 @@ router = APIRouter()
 
 
 @router.get("/recyclebin", summary="查詢資源回收筒中被刪除（DROP）的資料表，最近刪的排最前")
-async def recyclebin(
-    owner: Optional[str] = None, svc: FlashbackService = Depends(get_service)
-):
+async def recyclebin(owner: Optional[str] = None, svc: FlashbackService = Depends(get_service)):
     """Recycle bin contents, newest drop first (SOP §4.2 step 1)."""
     return {"entries": svc.list_recyclebin(owner)}
 
 
-@router.post("/flashback/table", dependencies=[Depends(require_api_key)],
-             summary="把資料表回溯到過去的時間點或 SCN，救回被誤改、誤刪的資料列（可逆）")
+@router.post(
+    "/flashback/table",
+    dependencies=[Depends(require_api_key)],
+    summary="把資料表回溯到過去的時間點或 SCN，救回被誤改、誤刪的資料列（可逆）",
+)
 async def flashback_table(
     request: FlashbackTableRequest,
     svc: FlashbackService = Depends(get_service),
@@ -35,8 +38,11 @@ async def flashback_table(
     return svc.flashback_table(request, operator=operator)
 
 
-@router.post("/flashback/drop", dependencies=[Depends(require_api_key)],
-             summary="從資源回收筒救回被誤刪（DROP）的整張資料表")
+@router.post(
+    "/flashback/drop",
+    dependencies=[Depends(require_api_key)],
+    summary="從資源回收筒救回被誤刪（DROP）的整張資料表",
+)
 async def flashback_drop(
     request: FlashbackDropRequest,
     svc: FlashbackService = Depends(get_service),
@@ -46,8 +52,11 @@ async def flashback_drop(
     return svc.flashback_drop(request, operator=operator)
 
 
-@router.post("/flashback/database", dependencies=[Depends(require_api_key)],
-             summary="把整個資料庫回溯到誤操作之前的狀態，救回大規模誤刪／誤改（不可逆，需審批）")
+@router.post(
+    "/flashback/database",
+    dependencies=[Depends(require_api_key)],
+    summary="把整個資料庫回溯到誤操作之前的狀態，救回大規模誤刪／誤改（不可逆，需審批）",
+)
 async def flashback_database(
     request: FlashbackDatabaseRequest,
     svc: FlashbackService = Depends(get_service),
@@ -58,8 +67,11 @@ async def flashback_database(
     return svc.flashback_database(request, operator=operator)
 
 
-@router.post("/flashback/database/finalize", dependencies=[Depends(require_api_key)],
-             summary="人工驗證後正式套用資料庫回溯（OPEN RESETLOGS，不可逆）")
+@router.post(
+    "/flashback/database/finalize",
+    dependencies=[Depends(require_api_key)],
+    summary="人工驗證後正式套用資料庫回溯（OPEN RESETLOGS，不可逆）",
+)
 async def finalize_database(
     request: FinalizeRequest,
     svc: FlashbackService = Depends(get_service),

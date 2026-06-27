@@ -1,3 +1,5 @@
+"""Restore-point routes: list / create / drop (SOP §3)."""
+
 from fastapi import APIRouter, Depends
 
 from api.dependencies import operator_from_key, require_api_key
@@ -22,8 +24,10 @@ async def create_restore_point(
 ):
     """Create a (guaranteed) restore point before a risky change (SOP §3.1)."""
     return svc.create_restore_point(
-        name=request.name, guarantee=request.guarantee,
-        dry_run=request.dry_run, operator=operator,
+        name=request.name,
+        guarantee=request.guarantee,
+        dry_run=request.dry_run,
+        operator=operator,
     )
 
 

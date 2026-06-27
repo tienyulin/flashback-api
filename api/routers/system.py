@@ -1,3 +1,5 @@
+"""System routes: health, aggregated precondition status, and the audit log."""
+
 from fastapi import APIRouter, Depends
 
 from core.deps import get_service

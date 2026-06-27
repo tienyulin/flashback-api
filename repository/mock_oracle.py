@@ -6,6 +6,7 @@ Simulates the effects of the SQL documented on OracleRepository:
   drive the P3 threshold)
 """
 
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -18,20 +19,42 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
 
-class MockOracleRepository(OracleRepository):
-    def __init__(self):
-        self.log_mode = "ARCHIVELOG"
-        self.flashback_on = True
-        self.db_state = "OPEN"
-        self.current_scn = 2_000_000
-        self.oldest_flashback_scn = 1_500_000
-        self.oldest_flashback_time = "2026-06-11T09:00:00"
-        self.retention_minutes = 1440
-        self.fra_limit_bytes = 10 * GIB
-        self.fra_used_bytes = 4 * GIB
-        self.estimated_flashback_size = 2 * GIB
-        self.resetlogs_time: Optional[str] = None
+@dataclass
+class _Fra:
+    """Fast Recovery Area usage (mirrors v$recovery_file_dest)."""
 
+    limit_bytes: int = 10 * GIB
+    used_bytes: int = 4 * GIB
+    estimated_flashback_size: int = 2 * GIB
+
+
+@dataclass
+class _FlashbackLog:
+    """Flashback retention window (mirrors v$flashback_database_log)."""
+
+    on: bool = True
+    oldest_scn: int = 1_500_000
+    oldest_time: str = "2026-06-11T09:00:00"
+    retention_minutes: int = 1440
+
+
+@dataclass
+class _MockDbState:
+    """Scalar v$ snapshot the mock advances as operations run (spec §4)."""
+
+    log_mode: str = "ARCHIVELOG"
+    db_state: str = "OPEN"
+    current_scn: int = 2_000_000
+    resetlogs_time: Optional[str] = None
+    fra: _Fra = field(default_factory=_Fra)
+    flashback: _FlashbackLog = field(default_factory=_FlashbackLog)
+
+
+class MockOracleRepository(OracleRepository):
+    """In-memory OracleRepository: deterministic state for tests and the mock demo."""
+
+    def __init__(self):
+        self.state = _MockDbState()
         self.restore_points: dict[str, dict] = {
             "BEFORE_UPGRADE_20260611": {
                 "name": "BEFORE_UPGRADE_20260611",
@@ -58,29 +81,30 @@ class MockOracleRepository(OracleRepository):
     # ------------------------------------------------------------------
 
     def _tick(self) -> None:
-        self.current_scn += 1
+        self.state.current_scn += 1
 
     def get_status(self) -> dict:
+        st = self.state
         return {
-            "log_mode": self.log_mode,
-            "flashback_on": self.flashback_on,
-            "db_state": self.db_state,
-            "current_scn": self.current_scn,
-            "oldest_flashback_scn": self.oldest_flashback_scn,
-            "oldest_flashback_time": self.oldest_flashback_time,
-            "retention_minutes": self.retention_minutes,
-            "fra_limit_bytes": self.fra_limit_bytes,
-            "fra_used_bytes": self.fra_used_bytes,
-            "estimated_flashback_size": self.estimated_flashback_size,
+            "log_mode": st.log_mode,
+            "flashback_on": st.flashback.on,
+            "db_state": st.db_state,
+            "current_scn": st.current_scn,
+            "oldest_flashback_scn": st.flashback.oldest_scn,
+            "oldest_flashback_time": st.flashback.oldest_time,
+            "retention_minutes": st.flashback.retention_minutes,
+            "fra_limit_bytes": st.fra.limit_bytes,
+            "fra_used_bytes": st.fra.used_bytes,
+            "estimated_flashback_size": st.fra.estimated_flashback_size,
         }
 
     def timestamp_to_scn(self, ts: str) -> int:
         # Spec §4 deterministic formula: +1 SCN per second from the oldest
         # flashback baseline, capped at current_scn.
-        oldest = datetime.fromisoformat(self.oldest_flashback_time)
+        oldest = datetime.fromisoformat(self.state.flashback.oldest_time)
         target = datetime.fromisoformat(ts)
         seconds = int((target - oldest).total_seconds())
-        return min(self.oldest_flashback_scn + seconds, self.current_scn)
+        return min(self.state.flashback.oldest_scn + seconds, self.state.current_scn)
 
     def list_restore_points(self) -> list[dict]:
         return sorted(self.restore_points.values(), key=lambda rp: rp["scn"])
@@ -89,20 +113,20 @@ class MockOracleRepository(OracleRepository):
         self._tick()
         rp = {
             "name": name,
-            "scn": self.current_scn,
+            "scn": self.state.current_scn,
             "time": _now(),
             "guarantee": guarantee,
             "storage_size": 1 * GIB if guarantee else 0,
         }
         self.restore_points[name] = rp
         if guarantee:
-            self.fra_used_bytes += 1 * GIB
+            self.state.fra.used_bytes += 1 * GIB
         return rp
 
     def drop_restore_point(self, name: str) -> None:
         rp = self.restore_points.pop(name)
         if rp["guarantee"]:
-            self.fra_used_bytes -= rp["storage_size"]
+            self.state.fra.used_bytes -= rp["storage_size"]
         self._tick()
 
     def list_recyclebin(self, owner: Optional[str] = None) -> list[dict]:
@@ -121,7 +145,8 @@ class MockOracleRepository(OracleRepository):
 
     def flashback_drop(self, owner: str, table_name: str, rename_to: Optional[str]) -> dict:
         matches = [
-            e for e in self.recyclebin
+            e
+            for e in self.recyclebin
             if e["owner"] == owner.upper() and e["original_name"] == table_name.upper()
         ]
         entry = max(matches, key=lambda e: e["droptime"])  # most recent drop
@@ -132,12 +157,12 @@ class MockOracleRepository(OracleRepository):
         return {"restored_as": restored_as, "from_entry": entry}
 
     def flashback_database(self, scn: int) -> None:
-        self.db_state = "FLASHBACKED"
-        self.current_scn = scn
+        self.state.db_state = "FLASHBACKED"
+        self.state.current_scn = scn
 
     def open_resetlogs(self) -> None:
-        self.db_state = "OPEN"
-        self.resetlogs_time = _now()
+        self.state.db_state = "OPEN"
+        self.state.resetlogs_time = _now()
         self._tick()
 
     def append_audit(self, entry: dict) -> None:

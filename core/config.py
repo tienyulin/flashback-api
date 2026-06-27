@@ -8,6 +8,8 @@ from functools import lru_cache
 
 @dataclass(frozen=True)
 class Settings:
+    """Immutable runtime settings loaded once from the environment (spec §5)."""
+
     mock_oracle: bool
     oracle_dsn: str
     oracle_user: str
@@ -17,6 +19,7 @@ class Settings:
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    """Return the process-wide cached Settings, read from environment variables."""
     return Settings(
         mock_oracle=os.getenv("MOCK_ORACLE", "false").lower() == "true",
         oracle_dsn=os.getenv("ORACLE_DSN", ""),

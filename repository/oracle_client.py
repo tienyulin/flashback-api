@@ -92,16 +92,15 @@ class RealOracleRepository(OracleRepository):
     """
 
     def __init__(self, dsn: str, user: str, password: str):
-        import oracledb  # noqa: F401 — fail fast if driver missing
+        # Optional driver, lazy-imported so mock/test envs need not install it.
+        import oracledb  # pylint: disable=import-outside-toplevel
 
         self._oracledb = oracledb
-        self._params = dict(dsn=dsn, user=user, password=password)
-        logger.info(f"RealOracleRepository configured for dsn={dsn}")
+        self._params = {"dsn": dsn, "user": user, "password": password}
+        logger.info("RealOracleRepository configured for dsn=%s", dsn)
 
     def _conn(self):
-        return self._oracledb.connect(
-            mode=self._oracledb.AUTH_MODE_SYSDBA, **self._params
-        )
+        return self._oracledb.connect(mode=self._oracledb.AUTH_MODE_SYSDBA, **self._params)
 
     # The real implementations execute the SQL from the ABC docstrings.
     # Not exercised in this repo (no Oracle instance); MOCK_ORACLE=true is

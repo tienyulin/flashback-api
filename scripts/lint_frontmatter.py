@@ -16,13 +16,15 @@ Exit non-zero (and print errors) on any nonconforming file.
 ponytail: tiny frontmatter parser for our subset (scalar / inline-list / dash-list),
 not a full YAML engine — that's all the schema allows anyway.
 """
+
 import json
 import os
 import re
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_SCHEMA = json.load(open(os.path.join(_HERE, "frontmatter.schema.json"), encoding="utf-8"))
+with open(os.path.join(_HERE, "frontmatter.schema.json"), encoding="utf-8") as _schema_f:
+    _SCHEMA = json.load(_schema_f)
 _ENDPOINT = re.compile(r"^\s*(GET|POST|PUT|DELETE|PATCH)\s+/\S*", re.MULTILINE)
 _H1 = re.compile(r"^#\s+\S", re.MULTILINE)
 
@@ -35,17 +37,17 @@ def parse_frontmatter(text):
     if end == -1:
         return {}, text
     block = text[3:end].strip("\n")
-    body = text[end + 4:]
+    body = text[end + 4 :]
     fm = {}
     for line in block.splitlines():
         if not line.strip() or line.lstrip().startswith("#") or ":" not in line:
             continue
         key, _, val = line.partition(":")
         key, val = key.strip(), val.strip()
-        if val.startswith("[") and val.endswith("]"):           # inline list
+        if val.startswith("[") and val.endswith("]"):  # inline list
             fm[key] = [v.strip().strip("'\"") for v in val[1:-1].split(",") if v.strip()]
         elif val == "":
-            fm[key] = []                                         # dash-list follows (rare); treated empty
+            fm[key] = []  # dash-list follows (rare); treated empty
         else:
             fm[key] = val.strip("'\"")
     return fm, body
@@ -56,8 +58,10 @@ def _match(pattern, value):
 
 
 def lint_file(path):
+    """Return a list of rule violations for one markdown file (empty = OK)."""
     errs = []
-    text = open(path, encoding="utf-8").read()
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
     fm, body = parse_frontmatter(text)
     props = _SCHEMA["properties"]
 
@@ -87,10 +91,15 @@ def lint_file(path):
 
 
 def main(argv):
+    """Lint the given markdown paths (or all *.md under cwd); return process exit code."""
     paths = argv[1:]
     if not paths:
-        paths = [os.path.join(d, f) for d, _, fs in os.walk(".")
-                 for f in fs if f.endswith(".md") and ".git" not in d]
+        paths = [
+            os.path.join(d, f)
+            for d, _, fs in os.walk(".")
+            for f in fs
+            if f.endswith(".md") and ".git" not in d
+        ]
     bad = 0
     for p in paths:
         if not p.endswith(".md"):

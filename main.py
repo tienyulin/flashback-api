@@ -1,3 +1,6 @@
+"""ASGI entrypoint: builds the FastAPI app, wires the unified error handler,
+and warms the singletons at boot (spec §5/§6)."""
+
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -17,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     """Warm up the singletons so misconfiguration fails at boot."""
     if not os.getenv("FLASHBACK_API_KEY"):
         logger.warning(
@@ -29,23 +32,24 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(
+    """Build and configure the FastAPI application (router + unified error handler)."""
+    application = FastAPI(
         title="Oracle Flashback Recovery API",
         version="0.1.0",
         description="API over DBA-SOP-014 (sop/oracle-flashback-recovery.md)",
         lifespan=lifespan,
     )
-    app.include_router(api_router)
+    application.include_router(api_router)
 
-    @app.exception_handler(FlashbackError)
-    async def flashback_error_handler(request: Request, exc: FlashbackError):
-        # Unified error body (spec §6): {"detail": str, "error_code": str|null}
+    @application.exception_handler(FlashbackError)
+    async def flashback_error_handler(_request: Request, exc: FlashbackError):
+        """Render a FlashbackError as the unified error body (spec §6)."""
         return JSONResponse(
             status_code=exc.status_code,
             content={"detail": exc.detail, "error_code": exc.error_code},
         )
 
-    return app
+    return application
 
 
 app = create_app()

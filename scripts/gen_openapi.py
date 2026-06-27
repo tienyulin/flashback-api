@@ -13,6 +13,7 @@ If the target isn't importable or has no .openapi() (not FastAPI / can't produce
 a spec), exit 0 WITHOUT writing — this hook simply doesn't apply (use Mode B,
 hand-written markdown). It never blocks a commit for that reason.
 """
+
 import argparse
 import importlib
 import json
@@ -21,19 +22,25 @@ import sys
 
 
 def main():
+    """Import the ASGI app and write its OpenAPI spec; skip gracefully if not applicable."""
     ap = argparse.ArgumentParser()
-    ap.add_argument("--app", default=os.environ.get("APP_MODULE", "app.main:app"),
-                    help="ASGI app target as module:attr (uvicorn style)")
+    ap.add_argument(
+        "--app",
+        default=os.environ.get("APP_MODULE", "app.main:app"),
+        help="ASGI app target as module:attr (uvicorn style)",
+    )
     ap.add_argument("--out", default="openapi.json")
     args = ap.parse_args()
 
     if ":" not in args.app:
-        print(f"[gen-openapi] --app 需為 module:attr，收到 '{args.app}' → 跳過"); return 0
+        print(f"[gen-openapi] --app 需為 module:attr，收到 '{args.app}' → 跳過")
+        return 0
     mod_name, attr = args.app.split(":", 1)
     try:
         mod = importlib.import_module(mod_name)
         app = getattr(mod, attr)
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        # Any import/attr failure means this hook doesn't apply (Mode B) — never block.
         print(f"[gen-openapi] 無法 import {args.app}（{type(e).__name__}）→ 跳過（走 Mode B 手寫）")
         return 0
     if not hasattr(app, "openapi") or not callable(app.openapi):
@@ -42,7 +49,8 @@ def main():
 
     try:
         spec = app.openapi()
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        # .openapi() can raise anything; report and fail this hook (real error).
         print(f"[gen-openapi] app.openapi() 失敗：{e}")
         return 1
     with open(args.out, "w", encoding="utf-8") as f:

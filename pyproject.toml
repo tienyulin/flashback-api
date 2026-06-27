@@ -1,0 +1,19 @@
+[tool.black]
+line-length = 100
+target-version = ["py314"]
+
+[tool.mypy]
+python_version = "3.14"
+ignore_missing_imports = true   # third-party libs ship no stubs (oracledb, mcp...)
+warn_unused_ignores = true
+check_untyped_defs = true
+
+[tool.pylint.main]
+py-version = "3.14"
+
+[tool.pylint.format]
+max-line-length = 100
+
+[tool.pylint.typecheck]
+# oracledb is an optional driver (installed only in real-Oracle mode); not a real import error.
+ignored-modules = ["oracledb"]

@@ -16,14 +16,21 @@ logger = logging.getLogger(__name__)
 
 @lru_cache(maxsize=1)
 def get_oracle() -> OracleRepository:
+    """Build the cached repository: in-memory mock or a real Oracle client."""
     settings = get_settings()
     if settings.mock_oracle:
-        from repository.mock_oracle import MockOracleRepository
+        # Lazy import: only the selected backend is loaded, so mock/test runs
+        # never require the oracledb driver.
+        from repository.mock_oracle import (  # pylint: disable=import-outside-toplevel
+            MockOracleRepository,
+        )
 
         logger.warning("MOCK_ORACLE=true — using in-memory MockOracleRepository")
         return MockOracleRepository()
 
-    from repository.oracle_client import RealOracleRepository
+    from repository.oracle_client import (  # pylint: disable=import-outside-toplevel
+        RealOracleRepository,
+    )
 
     if not settings.oracle_dsn:
         raise RuntimeError("ORACLE_DSN is required when MOCK_ORACLE is not enabled")
@@ -36,6 +43,7 @@ def get_oracle() -> OracleRepository:
 
 @lru_cache(maxsize=1)
 def get_service() -> FlashbackService:
+    """Build the cached FlashbackService over the configured repository."""
     return FlashbackService(oracle=get_oracle())
 
 

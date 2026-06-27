@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "wiki source-doc frontmatter",
+  "description": "Single source of truth for source-doc frontmatter rules. See docs/guides/authoring-source-docs.md. lint_frontmatter.py reads this file (no jsonschema dependency — it enforces the subset below).",
+  "type": "object",
+  "required": ["type", "source_app"],
+  "properties": {
+    "type": {
+      "description": "api = API service README; the four Diataxis kinds for knowledge docs.",
+      "enum": ["api", "tutorial", "how-to", "reference", "explanation"]
+    },
+    "source_app": {
+      "description": "App identity; also the wiki per-app object key.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "tags": {
+      "description": "Controlled vocabulary: lowercase + hyphen.",
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" }
+    },
+    "title": { "type": "string" }
+  }
+}

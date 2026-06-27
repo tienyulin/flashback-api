@@ -1,3 +1,9 @@
+---
+type: api
+source_app: flashback-api
+tags: [oracle, recovery, dba]
+---
+
 # flashback-api — Oracle Flashback Recovery API
 
 把 Oracle DBA 的 flashback 復原操作（誤改回溯、誤刪救回、還原點管理、整庫回溯）

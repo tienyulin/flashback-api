@@ -2,6 +2,7 @@
   "components": {
     "schemas": {
       "CreateRestorePointRequest": {
+        "description": "Body for POST /restore_points (spec §3).",
         "properties": {
           "dry_run": {
             "default": true,
@@ -67,6 +68,7 @@
         "type": "object"
       },
       "FinalizeRequest": {
+        "description": "Body for POST /flashback/database/finalize (irreversible; spec §3).",
         "properties": {
           "approval_id": {
             "anyOf": [
@@ -100,6 +102,7 @@
         "type": "object"
       },
       "FlashbackDatabaseRequest": {
+        "description": "Body for POST /flashback/database (irreversible; spec §3).",
         "properties": {
           "approval_id": {
             "anyOf": [
@@ -139,6 +142,7 @@
         "type": "object"
       },
       "FlashbackDropRequest": {
+        "description": "Body for POST /flashback/drop (spec §3).",
         "properties": {
           "dry_run": {
             "default": true,
@@ -173,6 +177,7 @@
         "type": "object"
       },
       "FlashbackTableRequest": {
+        "description": "Body for POST /flashback/table (spec §3).",
         "properties": {
           "dry_run": {
             "default": true,
@@ -301,11 +306,13 @@
         "operationId": "audit_log_audit_log_get",
         "parameters": [
           {
+            "description": "回傳的稽核紀錄筆數上限（自動夾在 1-1000）",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 100,
+              "description": "回傳的稽核紀錄筆數上限（自動夾在 1-1000）",
               "title": "Limit",
               "type": "integer"
             }
@@ -315,6 +322,18 @@
           "200": {
             "content": {
               "application/json": {
+                "example": {
+                  "entries": [
+                    {
+                      "dry_run": true,
+                      "operation": "flashback_table",
+                      "operator": "dev",
+                      "result": "dry_run",
+                      "target": "HR.EMPLOYEES",
+                      "timestamp": "2026-06-28T10:00:00"
+                    }
+                  ]
+                },
                 "schema": {}
               }
             },
@@ -329,9 +348,19 @@
               }
             },
             "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "unexpected error"
+                }
+              }
+            },
+            "description": "伺服器內部錯誤（unexpected internal error）"
           }
         },
-        "summary": "Audit Log"
+        "summary": "稽核軌跡，最新的排最前（SOP §8）"
       }
     },
     "/flashback/database": {
@@ -340,11 +369,13 @@
         "operationId": "flashback_database_flashback_database_post",
         "parameters": [
           {
+            "description": "操作者 API 金鑰（mutation 端點需要；啟用驗證時用於授權與稽核身分）",
             "in": "header",
             "name": "x-api-key",
             "required": false,
             "schema": {
               "default": "",
+              "description": "操作者 API 金鑰（mutation 端點需要；啟用驗證時用於授權與稽核身分）",
               "title": "X-Api-Key",
               "type": "string"
             }
@@ -364,10 +395,51 @@
           "200": {
             "content": {
               "application/json": {
+                "example": {
+                  "checks": {
+                    "P1_archivelog": {
+                      "ok": true
+                    }
+                  },
+                  "dry_run": true,
+                  "estimated_flashback_size": "2GB",
+                  "resolved_target_scn": 123000
+                },
                 "schema": {}
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Invalid or missing X-API-Key"
+                }
+              }
+            },
+            "description": "缺少或錯誤的 X-API-Key（啟用驗證時）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "restore point 'BEFORE_PATCH' does not exist — see GET /restore_points",
+                  "error_code": "ORA-38780"
+                }
+              }
+            },
+            "description": "目標資源不存在（resource not found）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "P1 violated: database is not in ARCHIVELOG mode"
+                }
+              }
+            },
+            "description": "SOP 前置條件未滿足或狀態衝突（precondition / state conflict）"
           },
           "422": {
             "content": {
@@ -378,6 +450,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "irreversible operation requires confirm='I-UNDERSTAND-DATA-LOSS' and a non-empty approval_id (change-approval ticket)"
+                }
+              }
+            },
+            "description": "不可逆操作需 confirm token + approval_id（confirmation required）"
           }
         },
         "summary": "把整個資料庫回溯到誤操作之前的狀態，救回大規模誤刪／誤改（不可逆，需審批）"
@@ -389,11 +471,13 @@
         "operationId": "finalize_database_flashback_database_finalize_post",
         "parameters": [
           {
+            "description": "操作者 API 金鑰（mutation 端點需要；啟用驗證時用於授權與稽核身分）",
             "in": "header",
             "name": "x-api-key",
             "required": false,
             "schema": {
               "default": "",
+              "description": "操作者 API 金鑰（mutation 端點需要；啟用驗證時用於授權與稽核身分）",
               "title": "X-Api-Key",
               "type": "string"
             }
@@ -413,10 +497,34 @@
           "200": {
             "content": {
               "application/json": {
+                "example": {
+                  "dry_run": true,
+                  "would_finalize_at_scn": 123456
+                },
                 "schema": {}
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Invalid or missing X-API-Key"
+                }
+              }
+            },
+            "description": "缺少或錯誤的 X-API-Key（啟用驗證時）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "database state is OPEN — nothing to finalize (expected FLASHBACKED, i.e. read-only validation window)"
+                }
+              }
+            },
+            "description": "SOP 前置條件未滿足或狀態衝突（precondition / state conflict）"
           },
           "422": {
             "content": {
@@ -427,6 +535,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "irreversible operation requires confirm='I-UNDERSTAND-DATA-LOSS' and a non-empty approval_id (change-approval ticket)"
+                }
+              }
+            },
+            "description": "不可逆操作需 confirm token + approval_id（confirmation required）"
           }
         },
         "summary": "人工驗證後正式套用資料庫回溯（OPEN RESETLOGS，不可逆）"
@@ -438,11 +556,13 @@
         "operationId": "flashback_drop_flashback_drop_post",
         "parameters": [
           {
+            "description": "操作者 API 金鑰（mutation 端點需要；啟用驗證時用於授權與稽核身分）",
             "in": "header",
             "name": "x-api-key",
             "required": false,
             "schema": {
               "default": "",
+              "description": "操作者 API 金鑰（mutation 端點需要；啟用驗證時用於授權與稽核身分）",
               "title": "X-Api-Key",
               "type": "string"
             }
@@ -462,10 +582,49 @@
           "200": {
             "content": {
               "application/json": {
+                "example": {
+                  "dry_run": true,
+                  "restored_as": "EMPLOYEES",
+                  "would_restore": {
+                    "original_name": "EMPLOYEES"
+                  }
+                },
                 "schema": {}
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Invalid or missing X-API-Key"
+                }
+              }
+            },
+            "description": "缺少或錯誤的 X-API-Key（啟用驗證時）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "HR.EMPLOYEES is not in the recycle bin (purged, or recyclebin=off)",
+                  "error_code": "ORA-38305"
+                }
+              }
+            },
+            "description": "目標資源不存在（resource not found）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "table HR.EMPLOYEES already exists — retry with rename_to",
+                  "error_code": "ORA-38312"
+                }
+              }
+            },
+            "description": "SOP 前置條件未滿足或狀態衝突（precondition / state conflict）"
           },
           "422": {
             "content": {
@@ -489,13 +648,34 @@
           "200": {
             "content": {
               "application/json": {
+                "example": {
+                  "db_state": "OPEN",
+                  "flashback_on": true,
+                  "fra_usage_percent": 42.0,
+                  "log_mode": "ARCHIVELOG",
+                  "preconditions": {
+                    "P1_archivelog": true,
+                    "P2_flashback_on": true,
+                    "P3_fra_space": true
+                  }
+                },
                 "schema": {}
               }
             },
             "description": "Successful Response"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "unexpected error"
+                }
+              }
+            },
+            "description": "伺服器內部錯誤（unexpected internal error）"
           }
         },
-        "summary": "Flashback Status"
+        "summary": "彙總 DB 狀態與 P1-P3 前置條件快照（SOP §2）"
       }
     },
     "/flashback/table": {
@@ -504,11 +684,13 @@
         "operationId": "flashback_table_flashback_table_post",
         "parameters": [
           {
+            "description": "操作者 API 金鑰（mutation 端點需要；啟用驗證時用於授權與稽核身分）",
             "in": "header",
             "name": "x-api-key",
             "required": false,
             "schema": {
               "default": "",
+              "description": "操作者 API 金鑰（mutation 端點需要；啟用驗證時用於授權與稽核身分）",
               "title": "X-Api-Key",
               "type": "string"
             }
@@ -528,20 +710,60 @@
           "200": {
             "content": {
               "application/json": {
+                "example": {
+                  "checks": {
+                    "P1_archivelog": {
+                      "ok": true
+                    }
+                  },
+                  "dry_run": true,
+                  "prior_scn": 123456
+                },
                 "schema": {}
               }
             },
             "description": "Successful Response"
           },
-          "422": {
+          "401": {
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                "example": {
+                  "detail": "Invalid or missing X-API-Key"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "缺少或錯誤的 X-API-Key（啟用驗證時）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "table HR.EMPLOYEES not found"
+                }
+              }
+            },
+            "description": "目標資源不存在（resource not found）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "P6 violated: HR.EMPLOYEES has ROW MOVEMENT disabled — retry with enable_row_movement=true",
+                  "error_code": "ORA-08189"
+                }
+              }
+            },
+            "description": "SOP 前置條件未滿足或狀態衝突（precondition / state conflict）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "target must contain exactly one of: scn, timestamp"
+                }
+              }
+            },
+            "description": "請求驗證失敗（request validation failed）"
           }
         },
         "summary": "把資料表回溯到過去的時間點或 SCN，救回被誤改、誤刪的資料列（可逆）"
@@ -555,13 +777,26 @@
           "200": {
             "content": {
               "application/json": {
+                "example": {
+                  "status": "ok"
+                },
                 "schema": {}
               }
             },
             "description": "Successful Response"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "unexpected error"
+                }
+              }
+            },
+            "description": "伺服器內部錯誤（unexpected internal error）"
           }
         },
-        "summary": "Health"
+        "summary": "存活檢查（liveness probe）"
       }
     },
     "/recyclebin": {
@@ -570,6 +805,7 @@
         "operationId": "recyclebin_recyclebin_get",
         "parameters": [
           {
+            "description": "只列出此 schema/owner 的項目（省略則全部）",
             "in": "query",
             "name": "owner",
             "required": false,
@@ -582,6 +818,7 @@
                   "type": "null"
                 }
               ],
+              "description": "只列出此 schema/owner 的項目（省略則全部）",
               "title": "Owner"
             }
           }
@@ -590,6 +827,16 @@
           "200": {
             "content": {
               "application/json": {
+                "example": {
+                  "entries": [
+                    {
+                      "droptime": "2026-06-20:10:00:00",
+                      "object_name": "BIN$abc==$0",
+                      "original_name": "EMPLOYEES",
+                      "owner": "HR"
+                    }
+                  ]
+                },
                 "schema": {}
               }
             },
@@ -604,6 +851,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "unexpected error"
+                }
+              }
+            },
+            "description": "伺服器內部錯誤（unexpected internal error）"
           }
         },
         "summary": "查詢資源回收筒中被刪除（DROP）的資料表，最近刪的排最前"
@@ -617,24 +874,47 @@
           "200": {
             "content": {
               "application/json": {
+                "example": {
+                  "restore_points": [
+                    {
+                      "guarantee": true,
+                      "name": "BEFORE_PATCH",
+                      "scn": 123456,
+                      "storage_size": 1048576,
+                      "time": "2026-06-28:09:00:00"
+                    }
+                  ]
+                },
                 "schema": {}
               }
             },
             "description": "Successful Response"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "unexpected error"
+                }
+              }
+            },
+            "description": "伺服器內部錯誤（unexpected internal error）"
           }
         },
-        "summary": "List Restore Points"
+        "summary": "列出現有還原點，依 SCN 排序（SOP §3.2）"
       },
       "post": {
         "description": "Create a (guaranteed) restore point before a risky change (SOP §3.1).",
         "operationId": "create_restore_point_restore_points_post",
         "parameters": [
           {
+            "description": "操作者 API 金鑰（mutation 端點需要；啟用驗證時用於授權與稽核身分）",
             "in": "header",
             "name": "x-api-key",
             "required": false,
             "schema": {
               "default": "",
+              "description": "操作者 API 金鑰（mutation 端點需要；啟用驗證時用於授權與稽核身分）",
               "title": "X-Api-Key",
               "type": "string"
             }
@@ -654,23 +934,49 @@
           "200": {
             "content": {
               "application/json": {
+                "example": {
+                  "checks": {},
+                  "dry_run": true,
+                  "would_create": "BEFORE_PATCH"
+                },
                 "schema": {}
               }
             },
             "description": "Successful Response"
           },
-          "422": {
+          "401": {
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                "example": {
+                  "detail": "Invalid or missing X-API-Key"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "缺少或錯誤的 X-API-Key（啟用驗證時）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "restore point 'BEFORE_PATCH' already exists — rename or DELETE it first",
+                  "error_code": "ORA-38796"
+                }
+              }
+            },
+            "description": "SOP 前置條件未滿足或狀態衝突（precondition / state conflict）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "target must contain exactly one of: scn, timestamp"
+                }
+              }
+            },
+            "description": "請求驗證失敗（request validation failed）"
           }
         },
-        "summary": "Create Restore Point"
+        "summary": "在風險變更前建立（保證型）還原點（SOP §3.1）"
       }
     },
     "/restore_points/{name}": {
@@ -679,30 +985,36 @@
         "operationId": "drop_restore_point_restore_points__name__delete",
         "parameters": [
           {
+            "description": "要刪除的還原點名稱（大小寫不敏感，內部轉大寫）",
             "in": "path",
             "name": "name",
             "required": true,
             "schema": {
+              "description": "要刪除的還原點名稱（大小寫不敏感，內部轉大寫）",
               "title": "Name",
               "type": "string"
             }
           },
           {
+            "description": "僅預演不實際刪除（true 時回報將刪除的還原點）",
             "in": "query",
             "name": "dry_run",
             "required": false,
             "schema": {
               "default": true,
+              "description": "僅預演不實際刪除（true 時回報將刪除的還原點）",
               "title": "Dry Run",
               "type": "boolean"
             }
           },
           {
+            "description": "操作者 API 金鑰（mutation 端點需要；啟用驗證時用於授權與稽核身分）",
             "in": "header",
             "name": "x-api-key",
             "required": false,
             "schema": {
               "default": "",
+              "description": "操作者 API 金鑰（mutation 端點需要；啟用驗證時用於授權與稽核身分）",
               "title": "X-Api-Key",
               "type": "string"
             }
@@ -712,10 +1024,38 @@
           "200": {
             "content": {
               "application/json": {
+                "example": {
+                  "dry_run": true,
+                  "would_drop": {
+                    "name": "BEFORE_PATCH",
+                    "scn": 123456
+                  }
+                },
                 "schema": {}
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Invalid or missing X-API-Key"
+                }
+              }
+            },
+            "description": "缺少或錯誤的 X-API-Key（啟用驗證時）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "restore point 'BEFORE_PATCH' does not exist — see GET /restore_points",
+                  "error_code": "ORA-38780"
+                }
+              }
+            },
+            "description": "目標資源不存在（resource not found）"
           },
           "422": {
             "content": {
@@ -728,7 +1068,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Drop Restore Point"
+        "summary": "變更驗證後刪除還原點（SOP §3.3/§6）"
       }
     }
   }

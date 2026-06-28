@@ -10,7 +10,7 @@ For `type: api` docs, also require an H1 and — when there is NO companion
 openapi.json next to the file — at least one `METHOD /path` endpoint line.
 
 Usage:
-  python lint_frontmatter.py [paths...]          # default: all *.md under cwd
+  python lint_frontmatter.py [paths...]          # default: all README.md under cwd
 Exit non-zero (and print errors) on any nonconforming file.
 
 ponytail: tiny frontmatter parser for our subset (scalar / inline-list / dash-list),
@@ -94,11 +94,13 @@ def main(argv):
     """Lint the given markdown paths (or all *.md under cwd); return process exit code."""
     paths = argv[1:]
     if not paths:
+        # Wiki source docs are README.md files; skip internal docs and hidden
+        # dirs (.git, .pytest_cache, ...) that are not pushed to the processor.
         paths = [
             os.path.join(d, f)
             for d, _, fs in os.walk(".")
             for f in fs
-            if f.endswith(".md") and ".git" not in d
+            if f == "README.md" and not any(p.startswith(".") for p in d.split(os.sep))
         ]
     bad = 0
     for p in paths:

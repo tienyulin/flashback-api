@@ -1,3 +1,5 @@
+"""Top-level API router aggregating the system / restore-point / flashback routers."""
+
 from fastapi import APIRouter
 
 from api.routers import flashback, restore_points, system

@@ -17,7 +17,10 @@ WARNING_FZ_RMAN = "RESETLOGS 完成，舊備份基線失效，立即執行 RMAN 
 # Domain entities (spec §1)
 # ---------------------------------------------------------------------------
 
+
 class RestorePoint(BaseModel):
+    """A v$restore_point row (spec §1)."""
+
     name: str
     scn: int
     time: str
@@ -26,6 +29,8 @@ class RestorePoint(BaseModel):
 
 
 class RecycleBinEntry(BaseModel):
+    """A dba_recyclebin row for a dropped object (spec §1)."""
+
     owner: str
     object_name: str
     original_name: str
@@ -33,6 +38,8 @@ class RecycleBinEntry(BaseModel):
 
 
 class AuditEntry(BaseModel):
+    """One persisted audit record (spec §7)."""
+
     timestamp: str
     operator: str
     operation: str
@@ -48,8 +55,10 @@ class AuditEntry(BaseModel):
 # Requests
 # ---------------------------------------------------------------------------
 
+
 class FlashbackTarget(BaseModel):
     """Exactly one of scn / timestamp (spec §3 flashback/table)."""
+
     scn: Optional[int] = None
     timestamp: Optional[str] = None
 
@@ -62,6 +71,7 @@ class FlashbackTarget(BaseModel):
 
 class DatabaseTarget(BaseModel):
     """Exactly one of restore_point / scn / timestamp (spec §3 flashback/database)."""
+
     restore_point: Optional[str] = None
     scn: Optional[int] = None
     timestamp: Optional[str] = None
@@ -75,12 +85,16 @@ class DatabaseTarget(BaseModel):
 
 
 class CreateRestorePointRequest(BaseModel):
+    """Body for POST /restore_points (spec §3)."""
+
     name: str = Field(min_length=1, max_length=128)
     guarantee: bool = True
     dry_run: bool = True
 
 
 class FlashbackTableRequest(BaseModel):
+    """Body for POST /flashback/table (spec §3)."""
+
     owner: str
     table_name: str
     target: FlashbackTarget
@@ -89,6 +103,8 @@ class FlashbackTableRequest(BaseModel):
 
 
 class FlashbackDropRequest(BaseModel):
+    """Body for POST /flashback/drop (spec §3)."""
+
     owner: str
     table_name: str
     rename_to: Optional[str] = None
@@ -96,6 +112,8 @@ class FlashbackDropRequest(BaseModel):
 
 
 class FlashbackDatabaseRequest(BaseModel):
+    """Body for POST /flashback/database (irreversible; spec §3)."""
+
     target: DatabaseTarget
     dry_run: bool = True
     confirm: Optional[str] = None
@@ -103,6 +121,8 @@ class FlashbackDatabaseRequest(BaseModel):
 
 
 class FinalizeRequest(BaseModel):
+    """Body for POST /flashback/database/finalize (irreversible; spec §3)."""
+
     dry_run: bool = True
     confirm: Optional[str] = None
     approval_id: Optional[str] = None

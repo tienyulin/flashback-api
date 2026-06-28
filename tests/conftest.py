@@ -1,5 +1,6 @@
 """Hermetic test setup: MOCK_ORACLE before anything builds the singletons;
 fresh mock state + cleared overrides per test."""
+
 import os
 
 import pytest
@@ -11,8 +12,9 @@ os.environ.setdefault("MOCK_ORACLE", "true")
 def _reset_dependency_state(monkeypatch):
     """Fresh singletons (and therefore a fresh MockOracleRepository) per test."""
     monkeypatch.delenv("FLASHBACK_API_KEY", raising=False)
-    from core import deps
-    from main import app
+    # Imported inside the fixture so MOCK_ORACLE is set before the app/singletons build.
+    from core import deps  # pylint: disable=import-outside-toplevel
+    from main import app  # pylint: disable=import-outside-toplevel
 
     app.dependency_overrides.clear()
     deps.reset_singletons()

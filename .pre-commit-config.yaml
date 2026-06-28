@@ -41,4 +41,12 @@ repos:
         name: frontmatter lint
         entry: python scripts/lint_frontmatter.py
         language: system
-        files: '\.md$'
+        files: '^README\.md$'
+      # Full test suite runs at push time only (too slow for every commit).
+      - id: pytest
+        name: pytest
+        entry: bash -c 'MOCK_ORACLE=true pytest -q'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
